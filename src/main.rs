@@ -54,7 +54,7 @@ async fn execute_process() {
       .join("./dumps").to_str().unwrap().to_owned()
   );
 
-  let _ = send_message(&format!("Dumping {} databases!", database_names.len()));
+  let _ = send_message(&format!("Dumping {} databases!", database_names.len())).await;
 
   {
     let save_path = Path::new(&save_path_string);
