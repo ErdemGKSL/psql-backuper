@@ -2,7 +2,7 @@ use std::fs;
 use std::path::Path;
 use std::time::Duration;
 use postgresql_commands::psql::PsqlBuilder;
-use postgresql_commands::{Result, CommandBuilder, CommandExecutor};
+use postgresql_commands::{Result, CommandBuilder, CommandExecutor, pg_restore, AsyncCommandExecutor};
 use regex::Regex;
 use postgresql_commands::pg_dump;
 use dotenv;
@@ -10,18 +10,26 @@ use dotenv;
 use serenity::builder::{ExecuteWebhook, CreateAttachment};
 use serenity::http;
 use serenity::model::webhook::Webhook;
-use tokio::fs::File;
+use tokio::fs::{File, DirEntry};
 
 #[tokio::main]
 async fn main() {
   dotenv::dotenv().ok();
+
+  let restore = 
+    std::env::var("RESTORE").unwrap_or("false".to_owned()) == "true" 
+      || std::env::args().nth(0).unwrap_or("false".to_owned()) == "restore";
+
+  if restore {
+    let _ = execute_restore().await;
+    return;
+  }
+
   let interval = std::env::var("INTERVAL")
-    .map(|s| {
-      s.parse().ok()
-    }).ok().flatten();
+    .map(|s| { s.parse().ok() }).ok().flatten();
 
   loop {
-    execute_process().await;
+    execute_dump().await;
     if let Some(interval) = interval {
       println!("Dumped once more!");
       tokio::time::sleep(Duration::from_secs(
@@ -33,8 +41,61 @@ async fn main() {
   }
 }
 
-async fn execute_process() {
-  let (out_list, _) = exec_sql("\\l").unwrap();
+async fn execute_restore() -> anyhow::Result<()> {
+  let restore_path_string = std::env::var("RESTORE_PATH").unwrap_or(
+    std::env::current_dir()
+      .unwrap()
+      .join("./dumps").to_str().unwrap().to_owned()
+  );
+
+  let restore_path = Path::new(&restore_path_string);
+
+  let mut files = tokio::fs::read_dir(restore_path)
+    .await?;
+
+  let mut joins = vec![];
+
+  loop {
+    let file = files.next_entry().await.ok().flatten();
+    if file.is_none() { break; }
+    let file = file.unwrap();
+
+    joins.push(tokio::spawn(async move {
+      restore(file).await;
+    }));
+  }
+
+  for join in joins {
+    let _ = join.await;
+  }
+
+  anyhow::Ok(())
+}
+
+async fn restore(file: DirEntry) {
+  let db_name = file.file_name().to_str().unwrap().to_owned().replace(".sql", "");
+  let Credentials { host, port, username, password } = get_credentials();
+  
+  let _ = exec_sql(&format!("CREATE DATABASE \"{db_name}\";"), None);
+
+  let mut restore_builder = pg_restore::PgRestoreBuilder::new()
+    .host(&host)
+    .port(port.clone())
+    .username(&username)
+    .file(file.path())
+    .dbname(db_name);
+
+  if let Some(pwd) = &password {
+    restore_builder = restore_builder.pg_password(pwd);
+  }
+
+  let mut restore = restore_builder.build_tokio();
+
+  let _ = restore.execute(None).await;
+}
+
+async fn execute_dump() {
+  let (out_list, _) = exec_sql("\\l", None).unwrap();
 
   let mut database_names = Vec::new();
   let re = Regex::new(r"\n ([^ ]+)").unwrap();
@@ -135,7 +196,7 @@ async fn send_file(file: &File, file_name: &str) -> Result<(), ()> {
   Ok(())
 }
 
-fn exec_sql(sql: &str) -> Result<(String, String)> {
+fn exec_sql(sql: &str, db: Option<String>) -> Result<(String, String)> {
   let Credentials { host, port, username, password } = get_credentials();
 
   let mut psql_builder = PsqlBuilder::new()
@@ -146,6 +207,10 @@ fn exec_sql(sql: &str) -> Result<(String, String)> {
 
   if let Some(pwd) = password {
     psql_builder = psql_builder.pg_password(pwd);
+  }
+
+  if let Some(db) = db {
+    psql_builder = psql_builder.dbname(db);
   }
 
   let mut psql = psql_builder.build();

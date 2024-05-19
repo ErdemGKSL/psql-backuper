@@ -882,6 +882,7 @@ dependencies = [
 name = "psql-backuper"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "dotenv",
  "postgresql_commands",
  "regex",
