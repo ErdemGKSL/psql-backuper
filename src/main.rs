@@ -2,7 +2,7 @@ use std::fs;
 use std::path::Path;
 use std::time::Duration;
 use postgresql_commands::psql::PsqlBuilder;
-use postgresql_commands::{Result, CommandBuilder, CommandExecutor, pg_restore, AsyncCommandExecutor};
+use postgresql_commands::{Result, CommandBuilder, AsyncCommandExecutor};
 use regex::Regex;
 use postgresql_commands::pg_dump;
 use dotenv;
@@ -59,9 +59,9 @@ async fn execute_restore() -> anyhow::Result<()> {
     let file = files.next_entry().await.ok().flatten();
     if file.is_none() { break; }
     let file = file.unwrap();
-
+    
     joins.push(tokio::spawn(async move {
-      restore(file).await;
+      let _ = restore(file).await;
     }));
   }
 
@@ -72,30 +72,35 @@ async fn execute_restore() -> anyhow::Result<()> {
   anyhow::Ok(())
 }
 
-async fn restore(file: DirEntry) {
+async fn restore(file: DirEntry) -> anyhow::Result<()> {
   let db_name = file.file_name().to_str().unwrap().to_owned().replace(".sql", "");
   let Credentials { host, port, username, password } = get_credentials();
   
-  let _ = exec_sql(&format!("CREATE DATABASE \"{db_name}\";"), None);
+  let _ = exec_sql(&format!("CREATE DATABASE \"{db_name}\";"), None).await;
 
-  let mut restore_builder = pg_restore::PgRestoreBuilder::new()
-    .host(&host)
-    .port(port.clone())
-    .username(&username)
+  let mut psql_builder = PsqlBuilder::new()
     .file(file.path())
-    .dbname(db_name);
+    .host(host)
+    .port(port)
+    .dbname(&db_name)
+    .username(username);
 
-  if let Some(pwd) = &password {
-    restore_builder = restore_builder.pg_password(pwd);
+  if let Some(pwd) = password {
+    psql_builder = psql_builder.pg_password(pwd);
   }
 
-  let mut restore = restore_builder.build_tokio();
+  let mut psql = psql_builder.build_tokio();
 
-  let _ = restore.execute(None).await;
+  let e = psql.execute(None).await;
+  if let Err(e) = e {
+    println!("{db_name}: {e:?}");
+  }
+  
+  anyhow::Ok(())
 }
 
 async fn execute_dump() {
-  let (out_list, _) = exec_sql("\\l", None).unwrap();
+  let (out_list, _) = exec_sql("\\l", None).await.unwrap();
 
   let mut database_names = Vec::new();
   let re = Regex::new(r"\n ([^ ]+)").unwrap();
@@ -196,7 +201,7 @@ async fn send_file(file: &File, file_name: &str) -> Result<(), ()> {
   Ok(())
 }
 
-fn exec_sql(sql: &str, db: Option<String>) -> Result<(String, String)> {
+async fn exec_sql(sql: &str, db: Option<String>) -> Result<(String, String)> {
   let Credentials { host, port, username, password } = get_credentials();
 
   let mut psql_builder = PsqlBuilder::new()
@@ -213,9 +218,9 @@ fn exec_sql(sql: &str, db: Option<String>) -> Result<(String, String)> {
     psql_builder = psql_builder.dbname(db);
   }
 
-  let mut psql = psql_builder.build();
+  let mut psql = psql_builder.build_tokio();
 
-  let (stdout, stderr) = psql.execute()?;
+  let (stdout, stderr) = psql.execute(None).await?;
   Ok((stdout, stderr))
 }
 
