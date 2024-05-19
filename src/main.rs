@@ -54,6 +54,8 @@ async fn execute_process() {
       .join("./dumps").to_str().unwrap().to_owned()
   );
 
+  let _ = send_message(&format!("Dumping {} databases!", database_names.len()));
+
   {
     let save_path = Path::new(&save_path_string);
     let _ = fs::create_dir_all(save_path);
@@ -109,10 +111,9 @@ async fn send_message(content: &str) -> Result<(), ()> {
     .map_err(|_| (()))?;
 
   let x_webhook = ExecuteWebhook::new()
-    .add_file(
-      CreateAttachment::file(file, file_name).await.map_err(|_| (()))?
-    ).username("PSQL BACKUPER");
-  let e = webhook.execute(&http, true, x_webhook).await;
+    .content(content)
+    .username("PSQL BACKUPER");
+  let _ = webhook.execute(&http, true, x_webhook).await;
   Ok(())
 }
 
@@ -130,7 +131,7 @@ async fn send_file(file: &File, file_name: &str) -> Result<(), ()> {
     .add_file(
       CreateAttachment::file(file, file_name).await.map_err(|_| (()))?
     ).username("PSQL BACKUPER");
-  let e = webhook.execute(&http, true, x_webhook).await;
+  let _ = webhook.execute(&http, true, x_webhook).await;
   Ok(())
 }
 
