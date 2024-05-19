@@ -14,6 +14,7 @@ use tokio::fs::File;
 
 #[tokio::main]
 async fn main() {
+  dotenv::dotenv().ok();
   let interval = std::env::var("INTERVAL")
     .map(|s| {
       s.parse().ok()
@@ -22,6 +23,7 @@ async fn main() {
   loop {
     execute_process().await;
     if let Some(interval) = interval {
+      println!("Dumped once more!");
       tokio::time::sleep(Duration::from_secs(
         interval
       )).await;
@@ -32,7 +34,6 @@ async fn main() {
 }
 
 async fn execute_process() {
-  dotenv::dotenv().ok();
   let (out_list, _) = exec_sql("\\l").unwrap();
 
   let mut database_names = Vec::new();
@@ -95,6 +96,24 @@ async fn execute_process() {
       let _ = join.await;
     }
   }
+}
+
+async fn send_message(content: &str) -> Result<(), ()> {
+  let webhook_url = std::env::var("WEBHOOK_URL")
+    .map_err(|_| (()))?;
+
+  let http = http::Http::new("");
+
+  let webhook = Webhook::from_url(&http, &webhook_url)
+    .await
+    .map_err(|_| (()))?;
+
+  let x_webhook = ExecuteWebhook::new()
+    .add_file(
+      CreateAttachment::file(file, file_name).await.map_err(|_| (()))?
+    ).username("PSQL BACKUPER");
+  let e = webhook.execute(&http, true, x_webhook).await;
+  Ok(())
 }
 
 async fn send_file(file: &File, file_name: &str) -> Result<(), ()> {
