@@ -77,7 +77,7 @@ async fn execute_process() {
       dump_builder = dump_builder.pg_password(pwd);
     }
 
-    let mut dump = dump_builder.build();
+    let mut dump = dump_builder.build_tokio();
 
     let dump = dump.spawn();
 
