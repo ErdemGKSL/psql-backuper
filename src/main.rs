@@ -112,7 +112,6 @@ async fn send_file(file: &File, file_name: &str) -> Result<(), ()> {
       CreateAttachment::file(file, file_name).await.map_err(|_| (()))?
     ).username("PSQL BACKUPER");
   let e = webhook.execute(&http, true, x_webhook).await;
-  println!("{e:?}");
   Ok(())
 }
 
