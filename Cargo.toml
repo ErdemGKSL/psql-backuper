@@ -7,6 +7,7 @@ edition = "2021"
 
 [dependencies]
 anyhow = "1.0.86"
+clap = { version = "4.5.27", features = ["derive"]}
 dotenv = "0.15.0"
 postgresql_commands = { version = "0.9.1", features = ["tokio"] }
 regex = "1.10.4"
